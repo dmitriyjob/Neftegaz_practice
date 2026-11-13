@@ -3,7 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mplconfig/
-data/
-results/
-Oil_Gas.csv
+/data/*
+!/data/Oil_Gas.csv
+/results/*
+!/results/oil_gas/
 

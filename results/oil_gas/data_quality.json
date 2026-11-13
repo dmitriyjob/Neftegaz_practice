@@ -1,0 +1,63 @@
+{
+  "n_rows": 15000,
+  "missing_raw": {
+    "Depth_m": 0,
+    "Reservoir_Pressure_MPa": 180,
+    "Porosity_pct": 180,
+    "Permeability_mD": 180,
+    "Net_Pay_m": 0,
+    "Oil_Rate_bpd": 180,
+    "Gas_Rate_Mscf_d": 180,
+    "Water_Cut_pct": 0
+  },
+  "excluded_future_columns": [
+    "Future_Oil_Rate_bpd",
+    "Future_Gas_Rate_Mscf_d",
+    "Future_Reservoir_Pressure_MPa"
+  ],
+  "period_start": "2018-01-01 00:00:00+00:00",
+  "period_end": "2028-04-07 18:00:00+00:00",
+  "wells_with_multiple_fields": 0,
+  "n_wells": 120,
+  "missing_well_medians": {
+    "Depth_m": 0,
+    "Reservoir_Pressure_MPa": 0,
+    "Porosity_pct": 0,
+    "Permeability_mD": 0,
+    "Net_Pay_m": 0,
+    "Oil_Rate_bpd": 0,
+    "Gas_Rate_Mscf_d": 0,
+    "Water_Cut_pct": 0
+  },
+  "within_well_std_median": {
+    "Depth_m": 648.3194846503,
+    "Reservoir_Pressure_MPa": 5.7430851703,
+    "Porosity_pct": 4.4407839021,
+    "Permeability_mD": 92.6795417365,
+    "Net_Pay_m": 5.9393971396,
+    "Oil_Rate_bpd": 196.0813341256,
+    "Gas_Rate_Mscf_d": 158.5667635706,
+    "Water_Cut_pct": 5.120131643
+  },
+  "between_well_median_std": {
+    "Depth_m": 72.3564316674,
+    "Reservoir_Pressure_MPa": 0.6709099344,
+    "Porosity_pct": 0.5634122233,
+    "Permeability_mD": 8.5141539981,
+    "Net_Pay_m": 0.7624934036,
+    "Oil_Rate_bpd": 20.2824708127,
+    "Gas_Rate_Mscf_d": 16.7006917867,
+    "Water_Cut_pct": 0.5513116458
+  },
+  "constant_features": [],
+  "active_features": [
+    "Depth_m",
+    "Reservoir_Pressure_MPa",
+    "Porosity_pct",
+    "Permeability_mD",
+    "Net_Pay_m",
+    "Oil_Rate_bpd",
+    "Gas_Rate_Mscf_d",
+    "Water_Cut_pct"
+  ]
+}
