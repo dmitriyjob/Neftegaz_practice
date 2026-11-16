@@ -22,8 +22,8 @@ K-means выделил две группы: **846 и 541 ствол**, сред�
 - [Заметки для выступления](docs/speaker_notes.md).
 - [Полный расчёт и диагностика](results/boem_2023/report.md).
 - [Паспорт открытых данных, единицы и правила отбора](data/boem/README.md).
-- Ревью и исправления: [первая итерация](docs/review_fix_1.md), [вторая итерация](docs/review_fix_2.md), [третья итерация](docs/review_fix_3.md).
-- Промпты рецензентов: [первая итерация](docs/review_prompts.md), [вторая итерация](docs/review_prompts_2.md), [третья итерация](docs/review_prompts_3.md).
+- Ревью и исправления: [первая итерация](docs/review_fix_1.md), [вторая итерация](docs/review_fix_2.md), [третья итерация](docs/review_fix_3.md), [четвёртая итерация](docs/review_fix_4.md).
+- Промпты рецензентов: [первая итерация](docs/review_prompts.md), [вторая итерация](docs/review_prompts_2.md), [третья итерация](docs/review_prompts_3.md), [четвёртая итерация](docs/review_prompts_4.md).
 
 ## Воспроизведение
 
@@ -58,6 +58,8 @@ python -m unittest discover -s tests -v
 Команда в отчёте и `run_manifest.json` сохраняет выбранный каталог. Поле `argv`
 содержит аргументы отдельно; строка `command` использует POSIX-кавычки для путей
 с пробелами и другими специальными символами.
+Если относительный путь невозможен, например между разными дисками Windows,
+сохраняется абсолютный аргумент, а ссылки отчёта используют файловые URI.
 Презентация и реферат строятся отдельно из `summary.json`; инструкции ниже.
 
 ## Что и зачем сравнивается
@@ -140,11 +142,13 @@ python scripts/build_report.py
 После задания путей выполните:
 
 ```bash
-node scripts/build_presentation.mjs --finalize --output .build/presentation-reviewed.pptx --render-dir .build/preview
+node scripts/build_presentation.mjs --finalize --output .build/final/presentation-reviewed.pptx --render-dir .build/preview
 ```
 
 Финализатор проверяет структуру PPTX и встроенные данные диаграмм. Он требует
-нового пути `--output` и не перезаписывает существующий файл. После сборки
+нового пути `--output` и не перезаписывает существующий файл. Готовый PPTX сохраняется
+в отдельном каталоге `.build/final`, служебные файлы проверки — в `.build/presentation`.
+После сборки
 осмотрите все PNG из каталога рендеров и сохраните проверенный PPTX как
 `presentation.pptx`. Диаграммы и таблицы в нём редактируются. Для основного
 расчёта и сборки Word среда Codex не требуется.
@@ -158,7 +162,7 @@ python cluster_wells.py --demo --output results/demo
 python cluster_wells.py --input data/boem/well_features.csv --features Oil_Rate_bpd Water_Cut_pct GOR_scf_bbl --log-features Oil_Rate_bpd GOR_scf_bbl --output results/custom
 ```
 
-Входной CSV должен быть в UTF-8 (допускается BOM), с уникальными заголовками
+Входной CSV должен быть в UTF-8 (допускается BOM), без NUL-символов, с уникальными заголовками
 и одинаковым числом полей во всех записях. Для пропуска оставьте пустое поле
 между разделителями. `--sep` принимает один символ, например `;` или табуляцию;
 `--decimal ,` задаёт десятичную запятую. Разделители и переводы строк внутри

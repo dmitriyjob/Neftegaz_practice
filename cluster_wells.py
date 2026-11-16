@@ -64,6 +64,8 @@ def read_well_csv(path: Path, sep: str = ",", decimal: str = ".") -> pd.DataFram
             for row in reader:
                 if not row:
                     continue
+                if any("\0" in field for field in row):
+                    raise ValueError(f"Строка CSV {reader.line_num}: недопустимый NUL-символ.")
                 if header is None:
                     header = row
                     if len(set(header)) != len(header):

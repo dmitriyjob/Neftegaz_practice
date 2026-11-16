@@ -1,16 +1,35 @@
 import json
+import ntpath
 import shlex
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
+from urllib.parse import urljoin, urlsplit
 
 import matplotlib.pyplot as plt
 
-from run_analysis import ROOT, run
+from run_analysis import ROOT, file_link, relative_or_absolute, run
 
 
 class AnalysisRunTests(unittest.TestCase):
+    def test_report_links_preserve_special_characters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            report = parent / "results" / "report.md"
+            target = parent / "Нефть #100% (данные)" / "data" / "boem" / "README.md"
+            link = file_link(target, report.parent)
+            self.assertEqual(urlsplit(link).fragment, "")
+            self.assertNotIn(" ", link)
+            self.assertEqual(urljoin(report.as_uri(), link), target.as_uri())
+
+    def test_paths_on_different_windows_drives(self):
+        project = PureWindowsPath("C:/Oil #100% Project")
+        output = PureWindowsPath("D:/results")
+        with patch("run_analysis.os.path.relpath", side_effect=ntpath.relpath):
+            self.assertEqual(relative_or_absolute(output, project), output)
+            self.assertEqual(file_link(project / "data", output), (project / "data").as_uri())
+
     def test_run_preserves_plot_settings_and_records_custom_output(self):
         with tempfile.TemporaryDirectory(prefix="-oil analysis ", dir=ROOT) as directory:
             output = Path(directory) / "results with spaces"

@@ -10,6 +10,7 @@ import os
 import platform
 import shlex
 from pathlib import Path
+from urllib.parse import quote
 
 import matplotlib
 
@@ -28,6 +29,18 @@ from prepare_boem import DEFAULT_DATA_DIR, prepare
 ROOT = Path(__file__).resolve().parent
 FEATURES = ["Oil_Rate_bpd", "Water_Cut_pct", "GOR_scf_bbl"]
 LOG_FEATURES = ["Oil_Rate_bpd", "GOR_scf_bbl"]
+
+
+def relative_or_absolute(path: Path, start: Path) -> Path:
+    try:
+        return Path(os.path.relpath(path, start))
+    except ValueError:
+        return path
+
+
+def file_link(path: Path, start: Path) -> str:
+    link = relative_or_absolute(path, start)
+    return link.as_uri() if link.is_absolute() else quote(link.as_posix(), safe="/")
 
 
 def json_write(path: Path, content: dict) -> None:
@@ -191,7 +204,7 @@ def run(output: Path) -> dict:
     output = output.resolve()
     command_args = ["python", "run_analysis.py"]
     if output != ROOT / "results" / "boem_2023":
-        output_arg = os.path.relpath(output, ROOT)
+        output_arg = str(relative_or_absolute(output, ROOT))
         if output_arg.startswith("-"):
             output_arg = "." + os.sep + output_arg
         command_args += ["--output", output_arg]
@@ -269,7 +282,7 @@ def run(output: Path) -> dict:
         "input_and_code_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
     })
     make_plots(output, wells, result, xy, pca.explained_variance_ratio_, sil)
-    report_content = report(summary).replace("../../data/", os.path.relpath(ROOT / "data", output) + "/").replace("../../docs/", os.path.relpath(ROOT / "docs", output) + "/")
+    report_content = report(summary).replace("../../data/", file_link(ROOT / "data", output) + "/").replace("../../docs/", file_link(ROOT / "docs", output) + "/")
     (output / "report.md").write_text(report_content, encoding="utf-8")
     return summary
 

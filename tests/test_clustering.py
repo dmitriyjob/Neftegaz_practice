@@ -145,6 +145,22 @@ class ClusteringTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Некорректный CSV"):
                 read_well_csv(path)
 
+    def test_csv_rejects_nul_in_headers_identifiers_and_numbers(self):
+        header = "Well_ID,Oil_Rate_bpd,Water_Cut_pct\n"
+        records = "A,10,90\nB,100,50\nC,1000,10\n"
+        cases = [
+            header.replace("Well_ID", "Well_ID\0suffix") + records,
+            header + records.replace("A,", "A\0B,"),
+            header + records.replace("10,90", "10\0999,90"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            for content in cases:
+                with self.subTest(content=content):
+                    path.write_text(content, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "NUL"):
+                        read_well_csv(path)
+
     def test_csv_requires_single_character_separator(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "wells.csv"
