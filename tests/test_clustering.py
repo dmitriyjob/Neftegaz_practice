@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import adjusted_rand_score
 
-from cluster_wells import FEATURES, analyze, make_demo, prepare_wells, report_text, save_outputs
+from cluster_wells import FEATURES, analyze, make_demo, prepare_wells, read_well_csv, report_text, save_outputs
 
 
 class ClusteringTests(unittest.TestCase):
@@ -78,6 +78,41 @@ class ClusteringTests(unittest.TestCase):
         self.assertEqual(len(wells), 90)
         self.assertEqual(wells.loc["DEMO_001", "Field_ID"], "DEMO")
         self.assertEqual(quality["wells_with_multiple_fields"], 0)
+
+    def test_csv_preserves_literal_ids_and_numeric_missing_values(self):
+        csv = ("Well_ID;Field_ID;Oil_Rate_bpd;Water_Cut_pct\n"
+               "NA;NA;10,5;90\nNULL;NULL;NA;80\n0001;00;1000;10\nN/A;A;1200;20\n")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            path.write_text(csv, encoding="utf-8")
+            data = read_well_csv(path, sep=";", decimal=",")
+            self.assertEqual(data.Well_ID.tolist(), ["NA", "NULL", "0001", "N/A"])
+            self.assertEqual(data.Field_ID.tolist(), ["NA", "NULL", "00", "A"])
+            self.assertEqual(data.Oil_Rate_bpd.iloc[0], 10.5)
+            self.assertTrue(pd.isna(data.Oil_Rate_bpd.iloc[1]))
+            result = analyze(data, ["Oil_Rate_bpd", "Water_Cut_pct"])
+            self.assertEqual(set(result.wells.index), {"NA", "NULL", "0001", "N/A"})
+            self.assertTrue(np.isfinite(result.scaled).all())
+            path.write_text(csv + ";A;1;1\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "пустым"):
+                analyze(read_well_csv(path, sep=";", decimal=","), ["Oil_Rate_bpd", "Water_Cut_pct"])
+
+    def test_csv_literal_field_ids_cannot_hide_a_conflict(self):
+        csv = ("Well_ID,Field_ID,Oil_Rate_bpd,Water_Cut_pct\n"
+               "A,NA,10,90\nA,NULL,20,80\nB,FIELD,1000,10\nC,FIELD,1200,20\n")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            path.write_text(csv, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "несколькими Field_ID"):
+                analyze(read_well_csv(path), ["Oil_Rate_bpd", "Water_Cut_pct"])
+
+    def test_rejects_identifiers_and_output_metadata_as_features(self):
+        for feature in ("API_Well_Number", "n_wells", "first_observation", "last_observation"):
+            with self.subTest(feature=feature):
+                data = self.data.copy()
+                data[feature] = np.arange(len(data))
+                with self.assertRaisesRegex(ValueError, "служебные столбцы"):
+                    analyze(data, ["Oil_Rate_bpd", feature])
 
     def test_accepts_mixed_iso_dates_and_checks_normalized_duplicates(self):
         self.data.loc[1, "Timestamp"] = "2025-01-02T03:00:00+03:00"

@@ -52,14 +52,21 @@ class Result:
     seed: int
 
 
+def read_well_csv(path: Path, sep: str = ",", decimal: str = ".") -> pd.DataFrame:
+    # converters сохраняют NA/NULL и ведущие нули в ID; числовые пропуски читает pandas.
+    return pd.read_csv(path, sep=sep, decimal=decimal,
+                       converters={"Well_ID": str, "Field_ID": str})
+
+
 def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, dict]:
     """Проверка данных и медианная агрегация повторных измерений по Well_ID."""
     if len(features) < 2 or len(set(features)) != len(features):
         raise ValueError("Укажите минимум два разных числовых признака.")
     forbidden = [f for f in features if f.startswith("Future_") or f in
-                 {"Well_ID", "Field_ID", "Timestamp", "cluster", "n_observations"}]
+                 {"Well_ID", "Field_ID", "API_Well_Number", "Timestamp", "cluster",
+                  "n_observations", "n_wells", "first_observation", "last_observation"}]
     if forbidden:
-        raise ValueError(f"Идентификаторы и будущие значения не являются признаками: {forbidden}")
+        raise ValueError(f"Идентификаторы, служебные столбцы и будущие значения не являются признаками: {forbidden}")
     missing = sorted(set(["Well_ID", *features]) - set(df.columns))
     if missing:
         raise ValueError(f"В CSV отсутствуют столбцы: {', '.join(missing)}")
@@ -121,7 +128,6 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
         wells["last_observation"] = grouped["Timestamp"].max()
     quality["n_wells"] = len(wells)
     quality["missing_well_medians"] = wells[features].isna().sum().astype(int).to_dict()
-    # Сравнение изменчивости внутри скважин с различиями их медиан.
     quality["within_well_std_median"] = grouped[features].std().median().to_dict()
     quality["between_well_median_std"] = wells[features].std().to_dict()
     return wells, quality
@@ -197,7 +203,6 @@ def analyze(df: pd.DataFrame, features: list[str] | None = None,
 
 
 def markdown_table(frame: pd.DataFrame) -> str:
-    """Markdown без дополнительной зависимости tabulate."""
     def fmt(value):
         if isinstance(value, (float, np.floating)):
             return f"{value:.3f}"
@@ -373,8 +378,7 @@ def main() -> None:
     parser.add_argument("--decimal", default=".", help="Десятичный разделитель")
     args = parser.parse_args()
     try:
-        df = make_demo() if args.demo else pd.read_csv(args.input, sep=args.sep, decimal=args.decimal,
-                                                       dtype={"Well_ID": "string", "Field_ID": "string"})
+        df = make_demo() if args.demo else read_well_csv(args.input, sep=args.sep, decimal=args.decimal)
         result = analyze(df, args.features, args.max_k, args.seed, log_features=args.log_features)
         save_outputs(result, args.output, "СИНТЕТИЧЕСКИЕ УЧЕБНЫЕ ДАННЫЕ" if args.demo else args.input.name)
         if args.demo:

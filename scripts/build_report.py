@@ -1,8 +1,4 @@
-"""Build the Russian report from the same verified summary as the slide deck.
-
-Run from the repository root: python scripts/build_report.py
-Requires python-docx. All case-study numbers come from summary.json.
-"""
+"""Build the DOCX and Markdown report from the analysis summary."""
 
 from __future__ import annotations
 
@@ -119,7 +115,7 @@ def report_blocks(summary):
         f"{number(summary['silhouette'], 3)}. Профили групп описаны медианами исходных "
         "характеристик входящих в них скважин. Они выражены в физических единицах "
         "и отличаются от центров K-means в преобразованном пространстве.")
-    add("table", headers=["Группа", "Скважин", "Нефть\nбарр./сут", "Вода\n%", "GOR\nscf/bbl"], rows=[
+    add("table", headers=["Группа", "Скважин", "Нефть\nбарр./сут работы", "Вода\n%", "GOR\nscf/bbl"], rows=[
         [str(item["cluster"]), number(item["n_wells"]), number(item["oil_rate_bpd"], 1),
          number(item["water_cut_pct"], 1), number(item["gor_scf_bbl"], 0)]
         for item in clusters], widths=[2.1, 2.3, 3.7, 3.1, 4.8])
@@ -133,20 +129,19 @@ def report_blocks(summary):
             "назначения стоит проверять отдельно.")
     add("p", "Для каждой группы выбран ближайший к её центру объект в пространстве модели. Значения "
         "относятся к этим скважинам, а не ко всей группе.")
-    add("table", headers=["Идентификатор", "Группа", "Нефть\nбарр./сут", "Вода\n%", "GOR\nscf/bbl"], rows=[
+    add("table", headers=["Идентификатор", "Группа", "Нефть\nбарр./сут работы", "Вода\n%", "GOR\nscf/bbl"], rows=[
         [str(item["well_id"]), str(item["cluster"]), number(item["oil_rate_bpd"], 1),
          number(item["water_cut_pct"], 1), number(item["gor_scf_bbl"], 0)]
         for item in summary["examples"]], widths=[4.2, 1.8, 3.5, 2.5, 4.0])
     wet = max(clusters, key=lambda item: item["water_cut_pct"])
     oil = max(clusters, key=lambda item: item["oil_rate_bpd"])
-    gas = max(clusters, key=lambda item: item["gor_scf_bbl"])
-    add("p", f"Для группы {wet['cluster']} с наибольшей медианной обводнённостью "
+    no_gor = next(check for check in stability["checks"] if check["name"] == "Без газового фактора")
+    add("p", "Группы прежде всего различаются дебитом нефти и обводнённостью. "
+        f"При исключении GOR состав меняется мало: ARI={number(no_gor['ari'], 3)}. "
+        f"Для группы {wet['cluster']} с наибольшей медианной обводнённостью "
         "полезно проверить динамику поступления воды и ограничения оборудования по обработке "
         f"жидкости. Группа {oil['cluster']} с наибольшим медианным дебитом нефти "
-        "подходит для подбора эксплуатационных аналогов при сопоставимых условиях. "
-        f"Для группы {gas['cluster']} с наибольшим медианным газовым фактором стоит проверить "
-        "историю давления, режим работы и учёт фаз. Это направления дальнейшей проверки, "
-        "а не готовые назначения промысловых мероприятий.")
+        "подходит для подбора эксплуатационных аналогов при сопоставимых условиях.")
     add("p", "Из кластеризации нельзя установить причину обводнения или рассчитать эффект "
         "ремонта. Для этого потребуются история работы, конструкция скважины, свойства "
         "пласта и результаты исследований. Номера групп условны и не являются оценкой качества скважин.")

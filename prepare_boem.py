@@ -62,7 +62,7 @@ def read_source(path: Path, expected_sha256: str = EXPECTED_SHA256) -> pd.DataFr
 
 
 def validate_records(frame: pd.DataFrame) -> pd.DataFrame:
-    """Reject ambiguous or physically invalid source records instead of repairing them silently."""
+    """Validate the schema and preparation assumptions of the pinned 2023 case."""
     missing = set(RAW_COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError(f"Missing source columns: {sorted(missing)}")
@@ -90,7 +90,7 @@ def validate_records(frame: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("Production days exceed calendar days in the reporting month")
     positive_volume = result[["Oil_bbl", "Gas_Mcf", "Water_bbl"]].sum(axis=1).gt(0)
     if (positive_volume & result["Days_On_Prod"].eq(0)).any():
-        raise ValueError("Positive production volume with zero production days")
+        raise ValueError("Positive production volume with zero production days is unsupported by this case")
     result["Is_Active"] = result["Days_On_Prod"].gt(0) | positive_volume
     return result
 

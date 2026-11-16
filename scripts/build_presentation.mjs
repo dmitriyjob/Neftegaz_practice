@@ -1,12 +1,5 @@
 #!/usr/bin/env node
-/**
- * Editable presentation from the analysis outputs.
- * Requires the Codex bundled @oai/artifact-tool runtime.
- * RUNTIME_NODE_MODULES points to its node_modules directory.
- * --finalize also requires PRESENTATION_SKILL_DIR and RUNTIME_PYTHON.
- * Use a new --output path with --finalize; validation never overwrites a file.
- * All research values are read from summary.json; none are copied by hand.
- */
+// Requires the Codex bundled @oai/artifact-tool runtime; see README.md.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -37,9 +30,7 @@ const talk = [];
 const nfmt = (value, digits = 0) => Number(value).toLocaleString('ru-RU', {
   minimumFractionDigits: digits, maximumFractionDigits: digits,
 });
-// Native chart workbooks use Excel numeric cells (15 significant digits).
-// Ten significant digits preserve plot geometry without unrepresentable literals.
-// The source summary.json remains at full numerical precision.
+// Keep chart literals within Excel's numeric precision; summary.json stays unchanged.
 const chartNumber = value => Number(Number(value).toPrecision(10));
 const wellWord = n => n % 100 >= 11 && n % 100 <= 14 ? 'стволов' : n % 10 === 1 ? 'ствол' : [2, 3, 4].includes(n % 10) ? 'ствола' : 'стволов';
 const groupWord = n => n % 100 >= 11 && n % 100 <= 14 ? 'групп' : n % 10 === 1 ? 'группа' : [2, 3, 4].includes(n % 10) ? 'группы' : 'групп';
@@ -99,8 +90,6 @@ function chart(s, type, options) {
     dataLabels: { textStyle: { ...chartText, fontSize: 22 } }, ...options });
 }
 
-// The following renderer is populated after the analysis has written its
-// documented summary schema. An absent field is an error, never a fake value.
 function requireField(object, key) {
   if (object[key] === undefined || object[key] === null) throw new Error(`Missing summary field: ${key}`);
   return object[key];
@@ -165,8 +154,8 @@ function methodSlide() {
     'от масштаба признаков. Иерархический метод Ward последовательно объединяет группы ' +
     'с наименьшим приростом внутригрупповой суммы квадратов. DBSCAN выделяет плотные ' +
     'области и шум, однако его результат зависит от радиуса окрестности и плотности. ' +
-    'Гауссова смесь описывает перекрывающиеся компоненты и даёт мягкие вероятностные ' +
-    'принадлежности. Эти вероятности относятся к модели, а не к геологической истинности группы.\n\n' +
+    'Гауссова смесь описывает перекрывающиеся компоненты и оценивает вероятности ' +
+    'принадлежности к ним. Эти вероятности зависят от предположений модели.\n\n' +
     'Источники: https://scikit-learn.org/stable/modules/clustering.html ; ' +
     'https://scikit-learn.org/stable/modules/mixture.html';
   const s = slide('Основные методы кластеризации', notes);
@@ -175,7 +164,7 @@ function methodSlide() {
     ['Метод', 'Как строится группа', 'Применение и ограничение'],
     ['K-means', 'Объекты ближе к одному центру', 'Обзор фонда по дебитам. Важны масштаб и выбросы.'],
     ['Иерархический\nметод Ward', 'Близкие группы последовательно объединяются', 'Поиск аналогов на разных уровнях. Дерево зависит от признаков.'],
-    ['DBSCAN', 'Связанные плотные области; редкие точки считаются шумом', 'Поиск необычных режимов. Нужно выбрать радиус и плотность.'],
+    ['DBSCAN', 'Связанные плотные области и отдельные точки шума', 'Поиск необычных режимов. Нужно выбрать радиус и плотность.'],
     ['Гауссова смесь', 'Вероятность принадлежности каждой компоненте', 'Перекрывающиеся режимы. Нужно проверить форму распределений.'],
   ], { y: 192, h: 420, widths: [225, 435, 492], size: 24 });
   footer(s, 'В практической части: K-means и сравнение с Ward');
@@ -214,7 +203,7 @@ function cover(d) {
   const s = slide('', `Мы рассматриваем кластеризацию добывающих скважин на реальных открытых данных ` +
     `${d.source.name}. Единицей анализа является 12-значный API, то есть отдельный ствол с учётом ` +
     `бокового ответвления. После отбора осталось ${d.counts.selected_wells} стволов. ` +
-    `Мы хотим найти группы с похожими годовым дебитом нефти, обводнённостью и газовым фактором. ` +
+    `Группируем стволы по годовому дебиту нефти, обводнённости и газовому фактору. ` +
     `Практический результат помогает выбрать объекты для сравнения и дальнейшего изучения. ` +
     `Он не определяет причину отличий и не назначает ремонт.\n\nДанные: ${d.source.url}`);
   text(s, 'Анализ данных в нефтегазе 26/27', 64, 63, 1100, 40, 26, { color: C.muted });
@@ -233,8 +222,9 @@ function dataSlide(d) {
     `Исходная строка относится к отчётному месяцу и completion, ` +
     `то есть эксплуатационному объекту внутри ствола. Поэтому количество строк нельзя ` +
     `считать количеством независимых скважин.\n\n` +
-    `Отбор: ${d.filters.map(f => `${f.label}: из ${f.before} осталось ${f.after}`).join('; ')}. ` +
-    `Активные записи должны иметь нефтедобывающий статус. Требование одного активного ` +
+    `Оставляем нефтяные стволы с отчётностью за все 12 месяцев и добычей нефти минимум ` +
+    `в 9 месяцах. Исключаем зарегистрированную закачку. Активные записи должны иметь ` +
+    `нефтедобывающий статус. Требование одного активного ` +
     `completion и отсутствия пересекающихся записей предотвращает двойной счёт дней. ` +
     `В итоге изучаем относительно регулярно работающий нефтяной фонд. Новые, ` +
     `простаивающие и смешанные нефтегазовые объекты представлены неполно.\n\n` +
@@ -352,7 +342,7 @@ function profilesSlide(d) {
 function examplesSlide(d) {
   const s = slide('Примеры скважин и практическая польза',
     `Для каждой группы показан реальный API, ближайший к её центру в пространстве ` +
-    `модели. Мы не выбирали визуально самые удобные примеры.\n\n` +
+    `модели.\n\n` +
     d.examples.map(e => `${e.well_id}: группа ${e.cluster}, дебит ${nfmt(e.oil_rate_bpd)} ` +
       `баррелей в сутки работы, вода ${nfmt(e.water_cut_pct, 1)}%, GOR ${nfmt(e.gor_scf_bbl)}.`).join(' ') +
     `\n\nСегментация даёт список похожих объектов для дальнейшего сравнения. ` +
@@ -360,7 +350,7 @@ function examplesSlide(d) {
     `на систему подготовки. При высоком газовом факторе полезны данные о давлении, ` +
     `газовом режиме и учёте продукции. Условия работы и причины изменения режима ` +
     `из этой таблицы неизвестны. Решение о воздействии на скважину требует дополнительных данных.`);
-  table(s, [['API ствола', 'Группа', 'Нефть,\nбарр./сут', 'Вода, %', 'GOR,\nст. фут³/барр.'],
+  table(s, [['API ствола', 'Группа', 'Нефть,\nбарр./сут работы', 'Вода, %', 'GOR,\nст. фут³/барр.'],
     ...d.examples.map(e => [e.well_id, `${e.cluster}`, nfmt(e.oil_rate_bpd), nfmt(e.water_cut_pct, 1), nfmt(e.gor_scf_bbl)])],
     { y: 166, h: Math.min(325, Math.max(240, (d.examples.length + 1) * 70)), widths: [310, 150, 250, 180, 262], size: 25 });
   text(s, 'Что проверить по каждой группе', 64, 500, 1152, 46, 30, { bold: true, color: C.teal });
@@ -377,11 +367,14 @@ function reliabilitySlide(d) {
   const noLog = st.checks.find(c => c.name === 'Без log1p');
   const noGor = st.checks.find(c => c.name === 'Без газового фактора');
   const robust = st.checks.find(c => c.name === 'RobustScaler');
+  const seedAri = st.seed_ari_min === st.seed_ari_max
+    ? nfmt(st.seed_ari_min, 3)
+    : `${nfmt(st.seed_ari_min, 3)}…${nfmt(st.seed_ari_max, 3)}`;
   const s = slide('Разбиение чувствительно к масштабу признаков',
     'ARI сравнивает два разбиения одних и тех же объектов с поправкой на случайное ' +
     'совпадение. Единица означает полное совпадение, значение около нуля означает ' +
     'уровень случайного совпадения. Без эталонных классов ARI не является точностью.\n\n' +
-    `При смене seed ARI от ${nfmt(st.seed_ari_min, 3)} до ${nfmt(st.seed_ari_max, 3)}. ` +
+    `При смене seed ARI равен ${seedAri}. ` +
     `Для Ward при том же k ARI ${nfmt(st.ward_ari, 3)}, силуэт ${nfmt(st.ward_silhouette, 3)}. ` +
     `В десяти подвыборках по 80% объектов ARI от ${nfmt(st.subsample_ari_min, 3)} до ` +
     `${nfmt(st.subsample_ari_max, 3)}, медиана ${nfmt(st.subsample_ari_median, 3)}. ` +
@@ -394,7 +387,7 @@ function reliabilitySlide(d) {
     '\n\nОграничения:\n' + d.caveats.join('\n') +
     '\n\nARI: https://scikit-learn.org/stable/modules/generated/sklearn.metrics.adjusted_rand_score.html');
   const values = [['Проверка при том же k', 'ARI'],
-    ['Три других seed', `${nfmt(st.seed_ari_min, 3)}…${nfmt(st.seed_ari_max, 3)}`],
+    ['Три других seed', seedAri],
     ['Ward вместо K-means', nfmt(st.ward_ari, 3)],
     ['80% стволов, медиана 10 повторов', nfmt(st.subsample_ari_median, 3)],
     [robust.name, nfmt(robust.ari, 3)],
