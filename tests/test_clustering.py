@@ -1,5 +1,3 @@
-"""Проверки единицы анализа, качества входа и воспроизводимости."""
-
 import tempfile
 import unittest
 from pathlib import Path
@@ -105,6 +103,56 @@ class ClusteringTests(unittest.TestCase):
             path.write_text(csv, encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "несколькими Field_ID"):
                 analyze(read_well_csv(path), ["Oil_Rate_bpd", "Water_Cut_pct"])
+
+    def test_csv_rejects_duplicate_headers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            for duplicate in ("Well_ID", "Oil_Rate_bpd"):
+                with self.subTest(duplicate=duplicate):
+                    path.write_text(f"Well_ID,Oil_Rate_bpd,Water_Cut_pct,{duplicate}\n"
+                                    "A,10,90,999\nB,100,50,888\nC,1000,10,777\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "повторяются имена"):
+                        read_well_csv(path)
+
+    def test_csv_rejects_nonrectangular_records(self):
+        rows = ["A,10,20,30\nB,20,30,40\nC,30,40,50\n", "A,10,20\nB,20\nC,30,40\n"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            for records in rows:
+                with self.subTest(records=records):
+                    path.write_text("Well_ID,Oil_Rate_bpd,Water_Cut_pct\n" + records, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "ожидалось 3 полей"):
+                        read_well_csv(path)
+
+    def test_csv_accepts_bom_quoted_delimiters_and_multiline_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            for sep in (",", ";", "\t"):
+                with self.subTest(sep=sep):
+                    path.write_text(f"Well_ID{sep}Field_ID{sep}Oil_Rate_bpd{sep}Water_Cut_pct\n\n"
+                                    f'"00{sep}1"{sep}"Field\n""One"""{sep}{sep}90\n'
+                                    f"NULL{sep}{sep}10{sep}80\n", encoding="utf-8-sig")
+                    data = read_well_csv(path, sep=sep)
+                    self.assertEqual(data.Well_ID.tolist(), [f"00{sep}1", "NULL"])
+                    self.assertEqual(data.Field_ID.tolist(), ['Field\n"One"', ""])
+                    self.assertTrue(pd.isna(data.Oil_Rate_bpd.iloc[0]))
+                    self.assertEqual(data.Oil_Rate_bpd.iloc[1], 10)
+
+    def test_csv_reports_malformed_quotes_as_value_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            path.write_text('Well_ID,Oil_Rate_bpd,Water_Cut_pct\nA,"10,90\n', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Некорректный CSV"):
+                read_well_csv(path)
+
+    def test_csv_requires_single_character_separator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            path.write_text("Well_ID,Oil_Rate_bpd,Water_Cut_pct\nA,10,90\n", encoding="utf-8")
+            for sep in ("", "||", r"\s+"):
+                with self.subTest(sep=sep):
+                    with self.assertRaisesRegex(ValueError, "одним символом"):
+                        read_well_csv(path, sep=sep)
 
     def test_rejects_identifiers_and_output_metadata_as_features(self):
         for feature in ("API_Well_Number", "n_wells", "first_observation", "last_observation"):

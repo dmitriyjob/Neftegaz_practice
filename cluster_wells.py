@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ FEATURES = [
     "Depth_m", "Reservoir_Pressure_MPa", "Porosity_pct", "Permeability_mD",
     "Net_Pay_m", "Oil_Rate_bpd", "Gas_Rate_Mscf_d", "Water_Cut_pct",
 ]
+COLORS = ["#087F8C", "#C77C24", "#4966A2", "#A64B66", "#6B8E48", "#7957A3", "#757575", "#A14F29"]
 TITLES = {
     "Depth_m": "Глубина, м",
     "Reservoir_Pressure_MPa": "Пластовое давление, МПа",
@@ -53,9 +55,28 @@ class Result:
 
 
 def read_well_csv(path: Path, sep: str = ",", decimal: str = ".") -> pd.DataFrame:
-    # converters сохраняют NA/NULL и ведущие нули в ID; числовые пропуски читает pandas.
-    return pd.read_csv(path, sep=sep, decimal=decimal,
-                       converters={"Well_ID": str, "Field_ID": str})
+    if len(sep) != 1:
+        raise ValueError("Разделитель CSV должен быть одним символом.")
+    with path.open(encoding="utf-8-sig", newline="") as source:
+        reader = csv.reader(source, delimiter=sep, strict=True)
+        header = None
+        try:
+            for row in reader:
+                if not row:
+                    continue
+                if header is None:
+                    header = row
+                    if len(set(header)) != len(header):
+                        raise ValueError("В CSV повторяются имена столбцов.")
+                elif len(row) != len(header):
+                    raise ValueError(f"Строка CSV {reader.line_num}: ожидалось {len(header)} полей, "
+                                     f"получено {len(row)}.")
+        except csv.Error as exc:
+            raise ValueError(f"Некорректный CSV в строке {reader.line_num}: {exc}") from exc
+        source.seek(0)
+        # converters сохраняют NA/NULL и ведущие нули в ID; числовые пропуски читает pandas.
+        return pd.read_csv(source, sep=sep, decimal=decimal,
+                           converters={"Well_ID": str, "Field_ID": str})
 
 
 def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, dict]:
@@ -160,7 +181,6 @@ def analyze(df: pd.DataFrame, features: list[str] | None = None,
     imputed = pd.DataFrame(SimpleImputer(strategy="median").fit_transform(wells[features]),
                            index=wells.index, columns=features)
     transformed = imputed.copy()
-    # Признаки с длинным правым хвостом задаются явно; профили сохраняют исходные единицы.
     for feature in log_features:
         transformed[feature] = np.log1p(transformed[feature])
     quality["log_features"] = log_features
@@ -332,7 +352,8 @@ def save_outputs(result: Result, output: Path, source: str) -> None:
     fig, ax = plt.subplots(figsize=(8, 6))
     for cluster in result.profiles.index:
         mask = result.labels == cluster
-        ax.scatter(xy[mask, 0], xy[mask, 1], label=f"Кластер {cluster} (n={mask.sum()})", alpha=.8)
+        ax.scatter(xy[mask, 0], xy[mask, 1], label=f"Кластер {cluster} (n={mask.sum()})",
+                   color=COLORS[(cluster - 1) % len(COLORS)], alpha=.8)
     variance = pca.explained_variance_ratio_
     ax.set(xlabel=f"PC1 ({variance[0]:.1%})", ylabel=f"PC2 ({variance[1]:.1%})",
            title=f"Скважины в проекции PCA: {variance.sum():.1%} дисперсии")

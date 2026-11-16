@@ -1,5 +1,9 @@
 {
   "command": "python run_analysis.py",
+  "argv": [
+    "python",
+    "run_analysis.py"
+  ],
   "python": "3.12.14",
   "packages": {
     "numpy": "2.3.5",
@@ -25,9 +29,9 @@
     8
   ],
   "input_and_code_sha256": {
-    "run_analysis.py": "f7bb091a08838b314462e96c3ae9ac6a7f82a950b2958bcbcd6712eef6392726",
-    "prepare_boem.py": "91ca0cdaf863224e9d7e9d9b368ca871f19db3d63eaebaa0b2bb3c3f9ba73536",
-    "cluster_wells.py": "aefde12bf1d4ea4aaa4cf91b1b4204c537d91f7ec5d966ecbed1f2dfb54f6a92",
+    "run_analysis.py": "b51389b21cf8910d42a45db23d12504eb06334cefe2e79b75e4e19fee5ca596e",
+    "prepare_boem.py": "1ffe70045a14acf5203a0f38159ed62e72f5efe72089a59f1f6a85118fc49dae",
+    "cluster_wells.py": "b75c0db67e86195868a8bc4bc44d822b964f0892ffc3072f7d7f0e8e495ad3f4",
     "requirements.txt": "5d7cb02cdd2474691550206274ff5b0b2a616f19622cd10c6aa82dfbae2d8b87",
     "data/boem/well_features.csv": "178e1e37b41d188753cd370609730670625a74646cc057ce80a64bdbd9ee119e",
     "data/boem/ogora2023delimit.zip": "2fe009536793135af0d4f3122be4485ccc24ecf25c87562d97906557673edf51"

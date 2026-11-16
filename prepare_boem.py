@@ -1,9 +1,4 @@
-"""Prepare one row per oil wellbore from the pinned BOEM OGOR-A 2023 snapshot.
-
-The default run is offline. IDs remain strings, including the API sidetrack suffix.
-Raw records describe completions; only API wellbores with one active completion
-are retained so production days cannot be counted twice.
-"""
+"""Prepare oil wellbore profiles from the pinned BOEM OGOR-A 2023 snapshot."""
 
 from __future__ import annotations
 

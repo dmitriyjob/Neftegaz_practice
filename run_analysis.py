@@ -8,6 +8,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import shlex
 from pathlib import Path
 
 import matplotlib
@@ -21,13 +22,12 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import adjusted_rand_score, silhouette_samples, silhouette_score
 from sklearn.preprocessing import RobustScaler, StandardScaler
 
-from cluster_wells import analyze, markdown_table, save_outputs
+from cluster_wells import COLORS, analyze, markdown_table, save_outputs
 from prepare_boem import DEFAULT_DATA_DIR, prepare
 
 ROOT = Path(__file__).resolve().parent
 FEATURES = ["Oil_Rate_bpd", "Water_Cut_pct", "GOR_scf_bbl"]
 LOG_FEATURES = ["Oil_Rate_bpd", "GOR_scf_bbl"]
-COLORS = ["#087F8C", "#C77C24", "#4966A2", "#A64B66", "#6B8E48", "#7957A3", "#757575", "#A14F29"]
 
 
 def json_write(path: Path, content: dict) -> None:
@@ -95,34 +95,34 @@ def sensitivity(wells: pd.DataFrame, result, monthly: pd.DataFrame) -> tuple[dic
 
 
 def make_plots(output: Path, wells: pd.DataFrame, result, xy: np.ndarray, variance: np.ndarray, sil: np.ndarray) -> None:
-    plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 12, "axes.spines.top": False,
-                         "axes.spines.right": False, "axes.titleweight": "bold", "figure.facecolor": "#FAF9F5"})
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    for c in result.profiles.index:
-        mask = result.labels == c
-        color = COLORS[c - 1]
-        axes[0].scatter(xy[mask, 0], xy[mask, 1], s=14, alpha=.55, color=color, label=f"Группа {c}: {mask.sum()}")
-        axes[1].scatter(wells.loc[mask, "Oil_Rate_bpd"], wells.loc[mask, "Water_Cut_pct"], s=14, alpha=.55, color=color)
-    axes[0].set(xlabel=f"PC1 ({variance[0]:.1%})", ylabel=f"PC2 ({variance[1]:.1%})", title="Проекция трёх признаков")
-    axes[0].legend(fontsize=10)
-    axes[1].set(xlabel="Нефть на день работы, барр./сут (log-шкала)", ylabel="Обводнённость, %", title="Профили в физических единицах", xscale="log")
-    fig.tight_layout()
-    fig.savefig(output / "well_groups.png", dpi=180)
-    plt.close(fig)
-    fig, ax = plt.subplots(figsize=(9, 5))
-    start = 0
-    for c in result.profiles.index:
-        values = np.sort(sil[result.labels == c])
-        y = np.arange(start, start + len(values))
-        ax.fill_betweenx(y, 0, values, color=COLORS[c - 1], alpha=.85)
-        ax.text(.02, start + len(values) / 2, f"Группа {c}, n={len(values)}", fontsize=11)
-        start += len(values) + 25
-    ax.axvline(sil.mean(), linestyle="--", color="#222222", label=f"Среднее {sil.mean():.3f}")
-    ax.set(xlabel="Индивидуальный силуэт", ylabel="Скважины, отсортированные внутри групп", yticks=[], title="Пограничные скважины видны по силуэту")
-    ax.legend(loc="upper right")
-    fig.tight_layout()
-    fig.savefig(output / "silhouette_distribution.png", dpi=180)
-    plt.close(fig)
+    with plt.rc_context({"font.family": "DejaVu Sans", "font.size": 12, "axes.spines.top": False,
+                         "axes.spines.right": False, "axes.titleweight": "bold", "figure.facecolor": "#FAF9F5"}):
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        for c in result.profiles.index:
+            mask = result.labels == c
+            color = COLORS[c - 1]
+            axes[0].scatter(xy[mask, 0], xy[mask, 1], s=14, alpha=.55, color=color, label=f"Группа {c}: {mask.sum()}")
+            axes[1].scatter(wells.loc[mask, "Oil_Rate_bpd"], wells.loc[mask, "Water_Cut_pct"], s=14, alpha=.55, color=color)
+        axes[0].set(xlabel=f"PC1 ({variance[0]:.1%})", ylabel=f"PC2 ({variance[1]:.1%})", title="Проекция трёх признаков")
+        axes[0].legend(fontsize=10)
+        axes[1].set(xlabel="Нефть на день работы, барр./сут (log-шкала)", ylabel="Обводнённость, %", title="Профили в физических единицах", xscale="log")
+        fig.tight_layout()
+        fig.savefig(output / "well_groups.png", dpi=180)
+        plt.close(fig)
+        fig, ax = plt.subplots(figsize=(9, 5))
+        start = 0
+        for c in result.profiles.index:
+            values = np.sort(sil[result.labels == c])
+            y = np.arange(start, start + len(values))
+            ax.fill_betweenx(y, 0, values, color=COLORS[c - 1], alpha=.85)
+            ax.text(.02, start + len(values) / 2, f"Группа {c}, n={len(values)}", fontsize=11)
+            start += len(values) + 25
+        ax.axvline(sil.mean(), linestyle="--", color="#222222", label=f"Среднее {sil.mean():.3f}")
+        ax.set(xlabel="Индивидуальный силуэт", ylabel="Скважины, отсортированные внутри групп", yticks=[], title="Пограничные скважины видны по силуэту")
+        ax.legend(loc="upper right")
+        fig.tight_layout()
+        fig.savefig(output / "silhouette_distribution.png", dpi=180)
+        plt.close(fig)
 
 
 def report(summary: dict) -> str:
@@ -188,6 +188,14 @@ def report(summary: dict) -> str:
 
 
 def run(output: Path) -> dict:
+    output = output.resolve()
+    command_args = ["python", "run_analysis.py"]
+    if output != ROOT / "results" / "boem_2023":
+        output_arg = os.path.relpath(output, ROOT)
+        if output_arg.startswith("-"):
+            output_arg = "." + os.sep + output_arg
+        command_args += ["--output", output_arg]
+    command = shlex.join(command_args)
     output.mkdir(parents=True, exist_ok=True)
     provenance = prepare()
     id_columns = ["Well_ID", "API_Well_Number", "Lease_Number", "Completion_Name", "Production_Interval_Code", "Area_Block", "Field_Name_Code"]
@@ -250,12 +258,12 @@ def run(output: Path) -> dict:
             "Годовые показатели скрывают динамику. Сравнение полугодий совмещает реальное изменение режима и чувствительность модели.",
             "В данных нет пластового давления, проницаемости, затрат и причин изменения режима. Кластеры не доказывают геологическую причинность или выгоду ремонта.",
             "Максимум силуэта среди k≥2 не является проверкой существования естественных кластеров. ARI не является точностью без эталонной разметки."],
-        "reproduce_command": "python run_analysis.py",
+        "reproduce_command": command,
     }
     json_write(output / "summary.json", summary)
     files = [ROOT / "run_analysis.py", ROOT / "prepare_boem.py", ROOT / "cluster_wells.py", ROOT / "requirements.txt", DEFAULT_DATA_DIR / "well_features.csv", DEFAULT_DATA_DIR / provenance["archive_name"]]
     json_write(output / "run_manifest.json", {
-        "command": "python run_analysis.py", "python": platform.python_version(),
+        "command": command, "argv": command_args, "python": platform.python_version(),
         "packages": {name: importlib.metadata.version(name) for name in ["numpy", "pandas", "scikit-learn", "matplotlib", "scipy"]},
         "features": FEATURES, "log_features": LOG_FEATURES, "scaler": "StandardScaler", "seed": 42, "n_init": 20, "k_range": [2, 8],
         "input_and_code_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files},

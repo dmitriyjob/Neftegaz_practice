@@ -1,5 +1,3 @@
-"""Tests for source integrity, observation units and petroleum feature formulas."""
-
 import hashlib
 import tempfile
 import unittest
