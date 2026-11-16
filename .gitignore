@@ -5,6 +5,13 @@ __pycache__/
 .mplconfig/
 /data/*
 !/data/Oil_Gas.csv
+!/data/boem/
+!/data/README.md
 /results/*
 !/results/oil_gas/
+!/results/boem_2023/
+node_modules/
+.build/
+.chart-data-*/
+.DS_Store
 

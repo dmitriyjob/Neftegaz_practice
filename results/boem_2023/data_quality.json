@@ -1,0 +1,35 @@
+{
+  "n_rows": 1387,
+  "missing_raw": {
+    "Oil_Rate_bpd": 0,
+    "Water_Cut_pct": 0,
+    "GOR_scf_bbl": 0
+  },
+  "excluded_future_columns": [],
+  "n_wells": 1387,
+  "missing_well_medians": {
+    "Oil_Rate_bpd": 0,
+    "Water_Cut_pct": 0,
+    "GOR_scf_bbl": 0
+  },
+  "within_well_std_median": {
+    "Oil_Rate_bpd": null,
+    "Water_Cut_pct": null,
+    "GOR_scf_bbl": null
+  },
+  "between_well_median_std": {
+    "Oil_Rate_bpd": 2737.5204968548,
+    "Water_Cut_pct": 34.7302778081,
+    "GOR_scf_bbl": 5818.6561663597
+  },
+  "log_features": [
+    "Oil_Rate_bpd",
+    "GOR_scf_bbl"
+  ],
+  "constant_features": [],
+  "active_features": [
+    "Oil_Rate_bpd",
+    "Water_Cut_pct",
+    "GOR_scf_bbl"
+  ]
+}

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import adjusted_rand_score
 
-from cluster_wells import FEATURES, analyze, make_demo, prepare_wells, save_outputs
+from cluster_wells import FEATURES, analyze, make_demo, prepare_wells, report_text, save_outputs
 
 
 class ClusteringTests(unittest.TestCase):
@@ -68,6 +68,55 @@ class ClusteringTests(unittest.TestCase):
         self.data.loc[self.data.Well_ID.eq("DEMO_001"), FEATURES] = np.nan
         with self.assertRaisesRegex(ValueError, "без единого"):
             analyze(self.data)
+
+    def test_rejects_same_well_id_on_different_fields(self):
+        self.data.loc[0, "Field_ID"] = "ANOTHER_FIELD"
+        with self.assertRaisesRegex(ValueError, "несколькими Field_ID"):
+            prepare_wells(self.data, FEATURES)
+        self.data.loc[0, "Field_ID"] = " DEMO "
+        wells, quality = prepare_wells(self.data, FEATURES)
+        self.assertEqual(len(wells), 90)
+        self.assertEqual(wells.loc["DEMO_001", "Field_ID"], "DEMO")
+        self.assertEqual(quality["wells_with_multiple_fields"], 0)
+
+    def test_accepts_mixed_iso_dates_and_checks_normalized_duplicates(self):
+        self.data.loc[1, "Timestamp"] = "2025-01-02T03:00:00+03:00"
+        wells, quality = prepare_wells(self.data, FEATURES)
+        self.assertEqual(wells.loc["DEMO_001", "n_observations"], 4)
+        self.assertEqual(quality["period_start"], "2025-01-01 00:00:00+00:00")
+        self.data.loc[1, "Timestamp"] = "2025-01-01T03:00:00+03:00"
+        with self.assertRaisesRegex(ValueError, "дубли"):
+            prepare_wells(self.data, FEATURES)
+
+    def test_custom_log_features_preserve_units_and_record_method(self):
+        self.data["GOR_scf_bbl"] = self.data.Gas_Rate_Mscf_d * 1000 / self.data.Oil_Rate_bpd
+        features = ["Oil_Rate_bpd", "GOR_scf_bbl", "Water_Cut_pct"]
+        result = analyze(self.data, features, log_features=features[:2])
+        self.assertEqual(result.quality["log_features"], features[:2])
+        pd.testing.assert_frame_equal(result.imputed, result.wells[features])
+        self.assertTrue(np.isfinite(result.scaled).all())
+        report = report_text(result, "TEST")
+        self.assertIn("log(1+x) применено к признакам: `Oil_Rate_bpd`, `GOR_scf_bbl`", report)
+        self.assertNotIn("Проницаемость, если выбрана", report)
+        without_log = analyze(self.data, features, log_features=[])
+        self.assertEqual(without_log.quality["log_features"], [])
+        self.assertFalse(np.allclose(result.scaled, without_log.scaled))
+        self.assertIn("Логарифмические преобразования не применялись", report_text(without_log, "TEST"))
+
+    def test_rejects_invalid_log_features_and_negative_gor(self):
+        for log_features in [["missing"], ["Depth_m", "Depth_m"], "Depth_m", [1]]:
+            with self.subTest(log_features=log_features):
+                with self.assertRaisesRegex(ValueError, "log-features"):
+                    analyze(self.data, log_features=log_features)
+        self.data["Custom"] = self.data.Oil_Rate_bpd
+        self.data.loc[0, "Custom"] = -1
+        # A negative observation must not be hidden by its well's positive median.
+        with self.assertRaisesRegex(ValueError, "неотрицательные"):
+            analyze(self.data, ["Custom", "Water_Cut_pct"], log_features=["Custom"])
+        self.data["GOR_scf_bbl"] = 100.0
+        self.data.loc[0, "GOR_scf_bbl"] = -1
+        with self.assertRaisesRegex(ValueError, "Отрицательные"):
+            analyze(self.data, ["Oil_Rate_bpd", "GOR_scf_bbl"], log_features=[])
 
     def test_rejects_too_few_wells_and_identical_profiles(self):
         with self.assertRaisesRegex(ValueError, "минимум три"):

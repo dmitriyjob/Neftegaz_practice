@@ -32,6 +32,7 @@ TITLES = {
     "Net_Pay_m": "Эффективная нефтенасыщенная толщина, м",
     "Oil_Rate_bpd": "Дебит нефти, барр./сут",
     "Gas_Rate_Mscf_d": "Дебит газа, тыс. станд. куб. футов/сут",
+    "GOR_scf_bbl": "Газовый фактор, станд. куб. футов/барр.",
     "Water_Cut_pct": "Обводнённость, %",
 }
 
@@ -75,7 +76,7 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
             raise ValueError(f"Нечисловые значения в {feature}.") from exc
         if np.isinf(frame[feature]).any():
             raise ValueError(f"Бесконечные значения в {feature}.")
-        if feature in FEATURES and frame[feature].lt(0).any():
+        if feature in {*FEATURES, "GOR_scf_bbl"} and frame[feature].lt(0).any():
             raise ValueError(f"Отрицательные значения в {feature}.")
         if feature.endswith("_pct") and not frame[feature].dropna().between(0, 100).all():
             raise ValueError(f"Процент {feature} вне диапазона 0–100.")
@@ -85,7 +86,7 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
         "excluded_future_columns": [c for c in frame if c.startswith("Future_")],
     }
     if "Timestamp" in frame:
-        dates = pd.to_datetime(frame["Timestamp"], errors="coerce", utc=True)
+        dates = pd.to_datetime(frame["Timestamp"], format="ISO8601", errors="coerce", utc=True)
         if dates.isna().any():
             raise ValueError("Timestamp содержит пропущенные или некорректные даты.")
         if pd.DataFrame({"id": frame["Well_ID"], "date": dates}).duplicated().any():
@@ -93,6 +94,14 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
         frame["Timestamp"] = dates
         quality["period_start"] = str(dates.min())
         quality["period_end"] = str(dates.max())
+    if "Field_ID" in frame:
+        frame["Field_ID"] = frame["Field_ID"].astype("string").str.strip().replace("", pd.NA)
+        field_counts = frame.groupby("Well_ID")["Field_ID"].nunique()
+        conflicts = field_counts[field_counts > 1].index.tolist()
+        if conflicts:
+            raise ValueError("Один Well_ID связан с несколькими Field_ID: "
+                             + ", ".join(conflicts[:5])
+                             + ". Используйте глобально уникальные идентификаторы скважин.")
     grouped = frame.groupby("Well_ID", sort=True)
     wells = grouped[features].median()
     if len(wells) < 3:
@@ -119,19 +128,36 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
 
 
 def analyze(df: pd.DataFrame, features: list[str] | None = None,
-            max_k: int = 8, seed: int = 42) -> Result:
+            max_k: int = 8, seed: int = 42, *,
+            log_features: list[str] | None = None) -> Result:
     features = list(FEATURES if features is None else features)
     if max_k < 2:
         raise ValueError("--max-k должен быть не меньше 2.")
     if not 0 <= seed < 2**32 - 3:
         raise ValueError("--seed должен быть от 0 до 4294967292.")
+    if log_features is None:
+        log_features = [f for f in features if f == "Permeability_mD"]
+    elif (not isinstance(log_features, list)
+          or any(not isinstance(f, str) for f in log_features)
+          or len(set(log_features)) != len(log_features)):
+        raise ValueError("--log-features должен содержать список разных имен признаков.")
+    else:
+        log_features = list(log_features)
+    unknown_log_features = sorted(set(log_features) - set(features))
+    if unknown_log_features:
+        raise ValueError("Признаки --log-features не входят в --features: "
+                         + ", ".join(unknown_log_features))
     wells, quality = prepare_wells(df, features)
+    for feature in log_features:
+        if pd.to_numeric(df[feature], errors="raise").lt(0).any():
+            raise ValueError(f"Для log1p нужны неотрицательные значения в {feature}.")
     imputed = pd.DataFrame(SimpleImputer(strategy="median").fit_transform(wells[features]),
                            index=wells.index, columns=features)
     transformed = imputed.copy()
-    # Только проницаемость: длинный правый хвост; единицы в отчёте остаются исходными.
-    if "Permeability_mD" in features:
-        transformed["Permeability_mD"] = np.log1p(transformed["Permeability_mD"])
+    # Признаки с длинным правым хвостом задаются явно; профили сохраняют исходные единицы.
+    for feature in log_features:
+        transformed[feature] = np.log1p(transformed[feature])
+    quality["log_features"] = log_features
     active = transformed.columns[transformed.nunique() > 1].tolist()
     quality["constant_features"] = [f for f in features if f not in active]
     if len(active) < 2:
@@ -193,9 +219,12 @@ def report_text(result: Result, source: str) -> str:
              "Одна строка модели — одна скважина. Повторные измерения агрегированы медианой "
              "за весь предоставленный период. Это характеристика типичного состояния, а не текущего режима. "
              "Пропуски игнорируются при агрегации; оставшиеся пустые медианы заменяются медианой по скважинам. "
-             "Строки без наблюдаемых выбранных признаков и полностью пустые признаки отклоняются.", "",
+             "Скважины без наблюдаемых выбранных признаков и полностью пустые признаки отклоняются.", "",
              "Признаки: " + ", ".join(f"`{f}`" for f in result.features) + ".", "",
-             "Проницаемость, если выбрана, преобразована log(1+x). Затем StandardScaler приводит "
+             ("Преобразование log(1+x) применено к признакам: "
+              + ", ".join(f"`{f}`" for f in q["log_features"]) + ". "
+              if q["log_features"] else "Логарифмические преобразования не применялись. ")
+             + "Затем StandardScaler приводит "
              "непостоянные признаки к нулевому среднему и единичной дисперсии. "
              "K-means работает в этом пространстве, PCA используется только для иллюстрации. "
              f"Для каждого k выполняется 20 инициализаций, random_state={result.seed}; "
@@ -333,8 +362,11 @@ def main() -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--input", type=Path, help="Путь к CSV со столбцом Well_ID")
     source.add_argument("--demo", action="store_true", help="Синтетический учебный пример")
-    parser.add_argument("--output", type=Path, default=Path("results"))
+    parser.add_argument("--output", type=Path, default=Path("results/custom"))
     parser.add_argument("--features", nargs="+", default=FEATURES)
+    parser.add_argument("--log-features", nargs="*", default=None,
+                        help="Признаки для log1p; по умолчанию Permeability_mD, если выбран. "
+                             "Пустой список отключает log1p.")
     parser.add_argument("--max-k", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sep", default=",", help="Разделитель CSV")
@@ -343,7 +375,7 @@ def main() -> None:
     try:
         df = make_demo() if args.demo else pd.read_csv(args.input, sep=args.sep, decimal=args.decimal,
                                                        dtype={"Well_ID": "string", "Field_ID": "string"})
-        result = analyze(df, args.features, args.max_k, args.seed)
+        result = analyze(df, args.features, args.max_k, args.seed, log_features=args.log_features)
         save_outputs(result, args.output, "СИНТЕТИЧЕСКИЕ УЧЕБНЫЕ ДАННЫЕ" if args.demo else args.input.name)
         if args.demo:
             df.to_csv(args.output / "synthetic_wells.csv", index=False)
