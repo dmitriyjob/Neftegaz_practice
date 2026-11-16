@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ FEATURES = [
     "Depth_m", "Reservoir_Pressure_MPa", "Porosity_pct", "Permeability_mD",
     "Net_Pay_m", "Oil_Rate_bpd", "Gas_Rate_Mscf_d", "Water_Cut_pct",
 ]
+COLORS = ["#087F8C", "#C77C24", "#4966A2", "#A64B66", "#6B8E48", "#7957A3", "#757575", "#A14F29"]
 TITLES = {
     "Depth_m": "Глубина, м",
     "Reservoir_Pressure_MPa": "Пластовое давление, МПа",
@@ -32,6 +34,7 @@ TITLES = {
     "Net_Pay_m": "Эффективная нефтенасыщенная толщина, м",
     "Oil_Rate_bpd": "Дебит нефти, барр./сут",
     "Gas_Rate_Mscf_d": "Дебит газа, тыс. станд. куб. футов/сут",
+    "GOR_scf_bbl": "Газовый фактор, станд. куб. футов/барр.",
     "Water_Cut_pct": "Обводнённость, %",
 }
 
@@ -51,14 +54,42 @@ class Result:
     seed: int
 
 
+def read_well_csv(path: Path, sep: str = ",", decimal: str = ".") -> pd.DataFrame:
+    if len(sep) != 1:
+        raise ValueError("Разделитель CSV должен быть одним символом.")
+    with path.open(encoding="utf-8-sig", newline="") as source:
+        reader = csv.reader(source, delimiter=sep, strict=True)
+        header = None
+        try:
+            for row in reader:
+                if not row:
+                    continue
+                if any("\0" in field for field in row):
+                    raise ValueError(f"Строка CSV {reader.line_num}: недопустимый NUL-символ.")
+                if header is None:
+                    header = row
+                    if len(set(header)) != len(header):
+                        raise ValueError("В CSV повторяются имена столбцов.")
+                elif len(row) != len(header):
+                    raise ValueError(f"Строка CSV {reader.line_num}: ожидалось {len(header)} полей, "
+                                     f"получено {len(row)}.")
+        except csv.Error as exc:
+            raise ValueError(f"Некорректный CSV в строке {reader.line_num}: {exc}") from exc
+        source.seek(0)
+        # converters сохраняют NA/NULL и ведущие нули в ID; числовые пропуски читает pandas.
+        return pd.read_csv(source, sep=sep, decimal=decimal,
+                           converters={"Well_ID": str, "Field_ID": str})
+
+
 def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, dict]:
     """Проверка данных и медианная агрегация повторных измерений по Well_ID."""
     if len(features) < 2 or len(set(features)) != len(features):
         raise ValueError("Укажите минимум два разных числовых признака.")
     forbidden = [f for f in features if f.startswith("Future_") or f in
-                 {"Well_ID", "Field_ID", "Timestamp", "cluster", "n_observations"}]
+                 {"Well_ID", "Field_ID", "API_Well_Number", "Timestamp", "cluster",
+                  "n_observations", "n_wells", "first_observation", "last_observation"}]
     if forbidden:
-        raise ValueError(f"Идентификаторы и будущие значения не являются признаками: {forbidden}")
+        raise ValueError(f"Идентификаторы, служебные столбцы и будущие значения не являются признаками: {forbidden}")
     missing = sorted(set(["Well_ID", *features]) - set(df.columns))
     if missing:
         raise ValueError(f"В CSV отсутствуют столбцы: {', '.join(missing)}")
@@ -75,7 +106,7 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
             raise ValueError(f"Нечисловые значения в {feature}.") from exc
         if np.isinf(frame[feature]).any():
             raise ValueError(f"Бесконечные значения в {feature}.")
-        if feature in FEATURES and frame[feature].lt(0).any():
+        if feature in {*FEATURES, "GOR_scf_bbl"} and frame[feature].lt(0).any():
             raise ValueError(f"Отрицательные значения в {feature}.")
         if feature.endswith("_pct") and not frame[feature].dropna().between(0, 100).all():
             raise ValueError(f"Процент {feature} вне диапазона 0–100.")
@@ -85,7 +116,7 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
         "excluded_future_columns": [c for c in frame if c.startswith("Future_")],
     }
     if "Timestamp" in frame:
-        dates = pd.to_datetime(frame["Timestamp"], errors="coerce", utc=True)
+        dates = pd.to_datetime(frame["Timestamp"], format="ISO8601", errors="coerce", utc=True)
         if dates.isna().any():
             raise ValueError("Timestamp содержит пропущенные или некорректные даты.")
         if pd.DataFrame({"id": frame["Well_ID"], "date": dates}).duplicated().any():
@@ -93,6 +124,14 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
         frame["Timestamp"] = dates
         quality["period_start"] = str(dates.min())
         quality["period_end"] = str(dates.max())
+    if "Field_ID" in frame:
+        frame["Field_ID"] = frame["Field_ID"].astype("string").str.strip().replace("", pd.NA)
+        field_counts = frame.groupby("Well_ID")["Field_ID"].nunique()
+        conflicts = field_counts[field_counts > 1].index.tolist()
+        if conflicts:
+            raise ValueError("Один Well_ID связан с несколькими Field_ID: "
+                             + ", ".join(conflicts[:5])
+                             + ". Используйте глобально уникальные идентификаторы скважин.")
     grouped = frame.groupby("Well_ID", sort=True)
     wells = grouped[features].median()
     if len(wells) < 3:
@@ -112,26 +151,41 @@ def prepare_wells(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, 
         wells["last_observation"] = grouped["Timestamp"].max()
     quality["n_wells"] = len(wells)
     quality["missing_well_medians"] = wells[features].isna().sum().astype(int).to_dict()
-    # Сравнение изменчивости внутри скважин с различиями их медиан.
     quality["within_well_std_median"] = grouped[features].std().median().to_dict()
     quality["between_well_median_std"] = wells[features].std().to_dict()
     return wells, quality
 
 
 def analyze(df: pd.DataFrame, features: list[str] | None = None,
-            max_k: int = 8, seed: int = 42) -> Result:
+            max_k: int = 8, seed: int = 42, *,
+            log_features: list[str] | None = None) -> Result:
     features = list(FEATURES if features is None else features)
     if max_k < 2:
         raise ValueError("--max-k должен быть не меньше 2.")
     if not 0 <= seed < 2**32 - 3:
         raise ValueError("--seed должен быть от 0 до 4294967292.")
+    if log_features is None:
+        log_features = [f for f in features if f == "Permeability_mD"]
+    elif (not isinstance(log_features, list)
+          or any(not isinstance(f, str) for f in log_features)
+          or len(set(log_features)) != len(log_features)):
+        raise ValueError("--log-features должен содержать список разных имен признаков.")
+    else:
+        log_features = list(log_features)
+    unknown_log_features = sorted(set(log_features) - set(features))
+    if unknown_log_features:
+        raise ValueError("Признаки --log-features не входят в --features: "
+                         + ", ".join(unknown_log_features))
     wells, quality = prepare_wells(df, features)
+    for feature in log_features:
+        if pd.to_numeric(df[feature], errors="raise").lt(0).any():
+            raise ValueError(f"Для log1p нужны неотрицательные значения в {feature}.")
     imputed = pd.DataFrame(SimpleImputer(strategy="median").fit_transform(wells[features]),
                            index=wells.index, columns=features)
     transformed = imputed.copy()
-    # Только проницаемость: длинный правый хвост; единицы в отчёте остаются исходными.
-    if "Permeability_mD" in features:
-        transformed["Permeability_mD"] = np.log1p(transformed["Permeability_mD"])
+    for feature in log_features:
+        transformed[feature] = np.log1p(transformed[feature])
+    quality["log_features"] = log_features
     active = transformed.columns[transformed.nunique() > 1].tolist()
     quality["constant_features"] = [f for f in features if f not in active]
     if len(active) < 2:
@@ -171,7 +225,6 @@ def analyze(df: pd.DataFrame, features: list[str] | None = None,
 
 
 def markdown_table(frame: pd.DataFrame) -> str:
-    """Markdown без дополнительной зависимости tabulate."""
     def fmt(value):
         if isinstance(value, (float, np.floating)):
             return f"{value:.3f}"
@@ -193,9 +246,12 @@ def report_text(result: Result, source: str) -> str:
              "Одна строка модели — одна скважина. Повторные измерения агрегированы медианой "
              "за весь предоставленный период. Это характеристика типичного состояния, а не текущего режима. "
              "Пропуски игнорируются при агрегации; оставшиеся пустые медианы заменяются медианой по скважинам. "
-             "Строки без наблюдаемых выбранных признаков и полностью пустые признаки отклоняются.", "",
+             "Скважины без наблюдаемых выбранных признаков и полностью пустые признаки отклоняются.", "",
              "Признаки: " + ", ".join(f"`{f}`" for f in result.features) + ".", "",
-             "Проницаемость, если выбрана, преобразована log(1+x). Затем StandardScaler приводит "
+             ("Преобразование log(1+x) применено к признакам: "
+              + ", ".join(f"`{f}`" for f in q["log_features"]) + ". "
+              if q["log_features"] else "Логарифмические преобразования не применялись. ")
+             + "Затем StandardScaler приводит "
              "непостоянные признаки к нулевому среднему и единичной дисперсии. "
              "K-means работает в этом пространстве, PCA используется только для иллюстрации. "
              f"Для каждого k выполняется 20 инициализаций, random_state={result.seed}; "
@@ -298,7 +354,8 @@ def save_outputs(result: Result, output: Path, source: str) -> None:
     fig, ax = plt.subplots(figsize=(8, 6))
     for cluster in result.profiles.index:
         mask = result.labels == cluster
-        ax.scatter(xy[mask, 0], xy[mask, 1], label=f"Кластер {cluster} (n={mask.sum()})", alpha=.8)
+        ax.scatter(xy[mask, 0], xy[mask, 1], label=f"Кластер {cluster} (n={mask.sum()})",
+                   color=COLORS[(cluster - 1) % len(COLORS)], alpha=.8)
     variance = pca.explained_variance_ratio_
     ax.set(xlabel=f"PC1 ({variance[0]:.1%})", ylabel=f"PC2 ({variance[1]:.1%})",
            title=f"Скважины в проекции PCA: {variance.sum():.1%} дисперсии")
@@ -333,17 +390,19 @@ def main() -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--input", type=Path, help="Путь к CSV со столбцом Well_ID")
     source.add_argument("--demo", action="store_true", help="Синтетический учебный пример")
-    parser.add_argument("--output", type=Path, default=Path("results"))
+    parser.add_argument("--output", type=Path, default=Path("results/custom"))
     parser.add_argument("--features", nargs="+", default=FEATURES)
+    parser.add_argument("--log-features", nargs="*", default=None,
+                        help="Признаки для log1p; по умолчанию Permeability_mD, если выбран. "
+                             "Пустой список отключает log1p.")
     parser.add_argument("--max-k", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sep", default=",", help="Разделитель CSV")
     parser.add_argument("--decimal", default=".", help="Десятичный разделитель")
     args = parser.parse_args()
     try:
-        df = make_demo() if args.demo else pd.read_csv(args.input, sep=args.sep, decimal=args.decimal,
-                                                       dtype={"Well_ID": "string", "Field_ID": "string"})
-        result = analyze(df, args.features, args.max_k, args.seed)
+        df = make_demo() if args.demo else read_well_csv(args.input, sep=args.sep, decimal=args.decimal)
+        result = analyze(df, args.features, args.max_k, args.seed, log_features=args.log_features)
         save_outputs(result, args.output, "СИНТЕТИЧЕСКИЕ УЧЕБНЫЕ ДАННЫЕ" if args.demo else args.input.name)
         if args.demo:
             df.to_csv(args.output / "synthetic_wells.csv", index=False)

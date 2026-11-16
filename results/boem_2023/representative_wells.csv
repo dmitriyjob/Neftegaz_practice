@@ -1,0 +1,3 @@
+well_id,cluster,oil_rate_bpd,water_cut_pct,gor_scf_bbl,representative_role
+608174094300,1,47.59270517,77.1559459,1198.748244,nearest_centroid
+608184004403,2,1044.992,25.69231119,760.0134738,nearest_centroid

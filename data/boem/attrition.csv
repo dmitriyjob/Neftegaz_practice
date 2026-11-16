@@ -1,0 +1,10 @@
+Stage,Wells_Before,Wells_After,Wells_Excluded,Source_Rows_Remaining,Reason
+00_source,5992,5992,0,74986,All valid 12-digit API wellbores in the source
+01_positive_oil,5992,2208,3784,28743,At least one month with positive oil volume
+02_oil_code_only,2208,1797,411,23154,Every record for the API has product code O; mixed gas/oil and unknown codes excluded
+03_oil_status,1797,1797,0,23154,"All active records have oil-producing status 08, 09, 10 or 19"
+04_full_year_reporting,1797,1756,41,22843,Records exist for each of the 12 calendar months in 2023
+05_single_active_completion,1756,1688,68,21337,One active lease/completion/interval identity per API throughout the year
+06_one_active_record_per_month,1688,1688,0,21337,No overlapping active completion records within an API-month
+07_at_least_nine_oil_months,1688,1388,300,17437,Positive oil production in at least nine months; excludes intermittent/new wells
+08_no_injection,1388,1387,1,17425,No reported injection in any record; avoids mixed production/injection days

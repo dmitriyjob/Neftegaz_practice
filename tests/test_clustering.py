@@ -1,5 +1,3 @@
-"""Проверки единицы анализа, качества входа и воспроизводимости."""
-
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +6,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import adjusted_rand_score
 
-from cluster_wells import FEATURES, analyze, make_demo, prepare_wells, save_outputs
+from cluster_wells import FEATURES, analyze, make_demo, prepare_wells, read_well_csv, report_text, save_outputs
 
 
 class ClusteringTests(unittest.TestCase):
@@ -68,6 +66,156 @@ class ClusteringTests(unittest.TestCase):
         self.data.loc[self.data.Well_ID.eq("DEMO_001"), FEATURES] = np.nan
         with self.assertRaisesRegex(ValueError, "без единого"):
             analyze(self.data)
+
+    def test_rejects_same_well_id_on_different_fields(self):
+        self.data.loc[0, "Field_ID"] = "ANOTHER_FIELD"
+        with self.assertRaisesRegex(ValueError, "несколькими Field_ID"):
+            prepare_wells(self.data, FEATURES)
+        self.data.loc[0, "Field_ID"] = " DEMO "
+        wells, quality = prepare_wells(self.data, FEATURES)
+        self.assertEqual(len(wells), 90)
+        self.assertEqual(wells.loc["DEMO_001", "Field_ID"], "DEMO")
+        self.assertEqual(quality["wells_with_multiple_fields"], 0)
+
+    def test_csv_preserves_literal_ids_and_numeric_missing_values(self):
+        csv = ("Well_ID;Field_ID;Oil_Rate_bpd;Water_Cut_pct\n"
+               "NA;NA;10,5;90\nNULL;NULL;NA;80\n0001;00;1000;10\nN/A;A;1200;20\n")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            path.write_text(csv, encoding="utf-8")
+            data = read_well_csv(path, sep=";", decimal=",")
+            self.assertEqual(data.Well_ID.tolist(), ["NA", "NULL", "0001", "N/A"])
+            self.assertEqual(data.Field_ID.tolist(), ["NA", "NULL", "00", "A"])
+            self.assertEqual(data.Oil_Rate_bpd.iloc[0], 10.5)
+            self.assertTrue(pd.isna(data.Oil_Rate_bpd.iloc[1]))
+            result = analyze(data, ["Oil_Rate_bpd", "Water_Cut_pct"])
+            self.assertEqual(set(result.wells.index), {"NA", "NULL", "0001", "N/A"})
+            self.assertTrue(np.isfinite(result.scaled).all())
+            path.write_text(csv + ";A;1;1\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "пустым"):
+                analyze(read_well_csv(path, sep=";", decimal=","), ["Oil_Rate_bpd", "Water_Cut_pct"])
+
+    def test_csv_literal_field_ids_cannot_hide_a_conflict(self):
+        csv = ("Well_ID,Field_ID,Oil_Rate_bpd,Water_Cut_pct\n"
+               "A,NA,10,90\nA,NULL,20,80\nB,FIELD,1000,10\nC,FIELD,1200,20\n")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            path.write_text(csv, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "несколькими Field_ID"):
+                analyze(read_well_csv(path), ["Oil_Rate_bpd", "Water_Cut_pct"])
+
+    def test_csv_rejects_duplicate_headers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            for duplicate in ("Well_ID", "Oil_Rate_bpd"):
+                with self.subTest(duplicate=duplicate):
+                    path.write_text(f"Well_ID,Oil_Rate_bpd,Water_Cut_pct,{duplicate}\n"
+                                    "A,10,90,999\nB,100,50,888\nC,1000,10,777\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "повторяются имена"):
+                        read_well_csv(path)
+
+    def test_csv_rejects_nonrectangular_records(self):
+        rows = ["A,10,20,30\nB,20,30,40\nC,30,40,50\n", "A,10,20\nB,20\nC,30,40\n"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            for records in rows:
+                with self.subTest(records=records):
+                    path.write_text("Well_ID,Oil_Rate_bpd,Water_Cut_pct\n" + records, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "ожидалось 3 полей"):
+                        read_well_csv(path)
+
+    def test_csv_accepts_bom_quoted_delimiters_and_multiline_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            for sep in (",", ";", "\t"):
+                with self.subTest(sep=sep):
+                    path.write_text(f"Well_ID{sep}Field_ID{sep}Oil_Rate_bpd{sep}Water_Cut_pct\n\n"
+                                    f'"00{sep}1"{sep}"Field\n""One"""{sep}{sep}90\n'
+                                    f"NULL{sep}{sep}10{sep}80\n", encoding="utf-8-sig")
+                    data = read_well_csv(path, sep=sep)
+                    self.assertEqual(data.Well_ID.tolist(), [f"00{sep}1", "NULL"])
+                    self.assertEqual(data.Field_ID.tolist(), ['Field\n"One"', ""])
+                    self.assertTrue(pd.isna(data.Oil_Rate_bpd.iloc[0]))
+                    self.assertEqual(data.Oil_Rate_bpd.iloc[1], 10)
+
+    def test_csv_reports_malformed_quotes_as_value_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            path.write_text('Well_ID,Oil_Rate_bpd,Water_Cut_pct\nA,"10,90\n', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Некорректный CSV"):
+                read_well_csv(path)
+
+    def test_csv_rejects_nul_in_headers_identifiers_and_numbers(self):
+        header = "Well_ID,Oil_Rate_bpd,Water_Cut_pct\n"
+        records = "A,10,90\nB,100,50\nC,1000,10\n"
+        cases = [
+            header.replace("Well_ID", "Well_ID\0suffix") + records,
+            header + records.replace("A,", "A\0B,"),
+            header + records.replace("10,90", "10\0999,90"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            for content in cases:
+                with self.subTest(content=content):
+                    path.write_text(content, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "NUL"):
+                        read_well_csv(path)
+
+    def test_csv_requires_single_character_separator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wells.csv"
+            path.write_text("Well_ID,Oil_Rate_bpd,Water_Cut_pct\nA,10,90\n", encoding="utf-8")
+            for sep in ("", "||", r"\s+"):
+                with self.subTest(sep=sep):
+                    with self.assertRaisesRegex(ValueError, "одним символом"):
+                        read_well_csv(path, sep=sep)
+
+    def test_rejects_identifiers_and_output_metadata_as_features(self):
+        for feature in ("API_Well_Number", "n_wells", "first_observation", "last_observation"):
+            with self.subTest(feature=feature):
+                data = self.data.copy()
+                data[feature] = np.arange(len(data))
+                with self.assertRaisesRegex(ValueError, "служебные столбцы"):
+                    analyze(data, ["Oil_Rate_bpd", feature])
+
+    def test_accepts_mixed_iso_dates_and_checks_normalized_duplicates(self):
+        self.data.loc[1, "Timestamp"] = "2025-01-02T03:00:00+03:00"
+        wells, quality = prepare_wells(self.data, FEATURES)
+        self.assertEqual(wells.loc["DEMO_001", "n_observations"], 4)
+        self.assertEqual(quality["period_start"], "2025-01-01 00:00:00+00:00")
+        self.data.loc[1, "Timestamp"] = "2025-01-01T03:00:00+03:00"
+        with self.assertRaisesRegex(ValueError, "дубли"):
+            prepare_wells(self.data, FEATURES)
+
+    def test_custom_log_features_preserve_units_and_record_method(self):
+        self.data["GOR_scf_bbl"] = self.data.Gas_Rate_Mscf_d * 1000 / self.data.Oil_Rate_bpd
+        features = ["Oil_Rate_bpd", "GOR_scf_bbl", "Water_Cut_pct"]
+        result = analyze(self.data, features, log_features=features[:2])
+        self.assertEqual(result.quality["log_features"], features[:2])
+        pd.testing.assert_frame_equal(result.imputed, result.wells[features])
+        self.assertTrue(np.isfinite(result.scaled).all())
+        report = report_text(result, "TEST")
+        self.assertIn("log(1+x) применено к признакам: `Oil_Rate_bpd`, `GOR_scf_bbl`", report)
+        self.assertNotIn("Проницаемость, если выбрана", report)
+        without_log = analyze(self.data, features, log_features=[])
+        self.assertEqual(without_log.quality["log_features"], [])
+        self.assertFalse(np.allclose(result.scaled, without_log.scaled))
+        self.assertIn("Логарифмические преобразования не применялись", report_text(without_log, "TEST"))
+
+    def test_rejects_invalid_log_features_and_negative_gor(self):
+        for log_features in [["missing"], ["Depth_m", "Depth_m"], "Depth_m", [1]]:
+            with self.subTest(log_features=log_features):
+                with self.assertRaisesRegex(ValueError, "log-features"):
+                    analyze(self.data, log_features=log_features)
+        self.data["Custom"] = self.data.Oil_Rate_bpd
+        self.data.loc[0, "Custom"] = -1
+        # A negative observation must not be hidden by its well's positive median.
+        with self.assertRaisesRegex(ValueError, "неотрицательные"):
+            analyze(self.data, ["Custom", "Water_Cut_pct"], log_features=["Custom"])
+        self.data["GOR_scf_bbl"] = 100.0
+        self.data.loc[0, "GOR_scf_bbl"] = -1
+        with self.assertRaisesRegex(ValueError, "Отрицательные"):
+            analyze(self.data, ["Oil_Rate_bpd", "GOR_scf_bbl"], log_features=[])
 
     def test_rejects_too_few_wells_and_identical_profiles(self):
         with self.assertRaisesRegex(ValueError, "минимум три"):

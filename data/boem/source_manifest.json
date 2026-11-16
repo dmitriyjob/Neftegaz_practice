@@ -1,0 +1,51 @@
+{
+  "dataset": "BOEM Oil and Gas Operations Reports, Part A (OGOR-A), 2023",
+  "publisher": "Bureau of Ocean Energy Management (BOEM), U.S. Department of the Interior",
+  "landing_page": "https://www.data.boem.gov/main/ogor-a.aspx",
+  "download_url": "https://www.data.boem.gov/Production/Files/ogora2023delimit.zip",
+  "data_dictionary": "https://www.data.boem.gov/Main/HtmlPage.aspx?page=ogorA",
+  "code_dictionary": "https://www.data.boem.gov/Main/HtmlPage.aspx?page=ogorAFields",
+  "unit_documentation": "https://www.data.boem.gov/Main/HtmlPage.aspx?page=ogorAPDF",
+  "operating_status_documentation": "https://onrr.gov/document/MPRH-Appendix-H.pdf",
+  "reuse_terms": "https://www.boem.gov/about-boem/disclaimer-liability-and-endorsement",
+  "data_quality_notice": "https://www.data.boem.gov/Main/HtmlPage.aspx?page=Disclaimer",
+  "accessed_on": "2026-11-16",
+  "period": {
+    "start": "2023-01",
+    "end": "2023-12"
+  },
+  "source_revision": "ZIP member timestamp 2026-11-01 05:39:52; byte snapshot identified by SHA256",
+  "archive_name": "ogora2023delimit.zip",
+  "archive_sha256": "2fe009536793135af0d4f3122be4485ccc24ecf25c87562d97906557673edf51",
+  "archive_bytes": 1636812,
+  "member_name": "ogora2023delimit.txt",
+  "source_rows": 74986,
+  "source_api_wellbores": 5992,
+  "selected_api_wellbores": 1387,
+  "selected_monthly_rows": 17425,
+  "observation_unit": "One 12-digit API wellbore, including sidetrack suffix, aggregated over 2023",
+  "source_observation_unit": "Completion-month",
+  "model_features": [
+    "Oil_Rate_bpd",
+    "Water_Cut_pct",
+    "GOR_scf_bbl"
+  ],
+  "formulas": {
+    "Oil_Rate_bpd": "sum(Oil_bbl) / sum(Days_On_Prod of the single active completion)",
+    "Water_Cut_pct": "100 * sum(Water_bbl) / (sum(Oil_bbl) + sum(Water_bbl))",
+    "GOR_scf_bbl": "1000 * sum(Gas_Mcf) / sum(Oil_bbl)"
+  },
+  "validation": {
+    "exact_duplicates": 0,
+    "duplicate_completion_month_keys": 0,
+    "invalid_api_identifiers": 0,
+    "invalid_calendar_days": 0,
+    "negative_or_missing_numeric_values": 0,
+    "positive_volume_with_zero_days": 0
+  },
+  "generated_files_sha256": {
+    "well_features.csv": "178e1e37b41d188753cd370609730670625a74646cc057ce80a64bdbd9ee119e",
+    "monthly_selected.csv": "cbb575496852fec854903cf0e72fec5bba260eba467cdadf2fd5ca60f39c4807",
+    "attrition.csv": "e89a59669435a28880cf41af97b45ade3614a105614c8399b1d238a84f176634"
+  }
+}
